@@ -32,6 +32,49 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated, IsOwnerOrAdmin]
     lookup_field = 'code'
     
+class UserDeleteView(generics.DestroyAPIView):
+    queryset = User.objects.all()
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, IsOwnerOrAdmin]
+    lookup_field = 'code'
+    
+    def delete(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
+        if instance.image:
+            instance.image.delete(save=False)
+        
+        # Empêcher l'auto-suppression
+        if instance.id == request.user.id:
+            return Response(
+                {"detail": "Vous ne pouvez pas supprimer votre propre compte."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Vérifier la hiérarchie des rôles
+        current_user_role = request.user.role.code
+        target_user_role = instance.role.code
+        
+        role_hierarchy = {
+            RoleEnum.OWNER: 4,
+            RoleEnum.ADMINISTRATOR: 3,
+            RoleEnum.MODERATOR: 2,
+            RoleEnum.MEMBER: 1,
+        }
+        
+        current_level = role_hierarchy.get(current_user_role, 0)
+        target_level = role_hierarchy.get(target_user_role, 0)
+        
+        # Seul le owner peut tout faire
+        if current_user_role != RoleEnum.OWNER:
+            # Les admins ne peuvent pas supprimer d'autres admins ou owners
+            if target_level >= current_level:
+                return Response(
+                    {"detail": "Vous ne pouvez pas supprimer cet utilisateur."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        return super().delete(request, *args, **kwargs)
     
 class StatusToggleView(APIView):
     authentication_classes = [JWTAuthentication]
